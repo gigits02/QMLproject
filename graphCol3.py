@@ -3,58 +3,66 @@ from pennylane import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from itertools import product
+from functools import reduce
+import operator
 
 #GRAFO
 # Parametri
-n_nodes = 4
-edges = [(0, 1), (1, 2), (2, 3)] 
+n_nodes = 3
+k_colors = 3
+edges = [(0, 1), (1, 2), (2, 0)]
 graph = nx.Graph(edges)
 positions = nx.spring_layout(graph, seed=1)
 nx.draw(graph, with_labels=True, pos=positions)
 plt.show()
 
 #FOR K_COLORS IN RANGE(30) GIRERÀ CERCANDO IL NUM CROMATICO DEL GRAFO
-for k_colors in range(2,30):
+for k_colors in range(2, 30):
 
-    n_qubits = n_nodes * k_colors
+    m = int(np.ceil(np.log2(k_colors)))  # qubits per nodo
+    n_qubits = n_nodes * m
     wires = list(range(n_qubits))
 
-    # Mappa nodo-colore → qubit
-    def qubit_index(node, color):
-        return node * k_colors + color
+    # Qubit per nodo
+    def qubits_for_node(v):
+        return [v * m + i for i in range(m)]
 
     # Hamiltoniano di costo
-    cost_h = 0
+    cost_h = qml.Hamiltonian([], [])  # inizializzazione esplicita
 
-    # Penalità: ogni nodo deve avere un solo colore
-    for node in range(n_nodes):
-        terms = []
-        for color in range(k_colors):
-            wire = qubit_index(node, color)
-            terms.append((qml.Identity(wire) - qml.PauliZ(wire)) / 2)
-        # Somma dei bit attivati
-        sum_x = terms[0]
-        for t in terms[1:]:
-            sum_x += t
-        # (sum - 1)^2 = sum^2 - 2sum + 1
-        cost_h += sum_x @ sum_x - 2 * sum_x + 1
-
-
-    # Penalità: nodi adiacenti non devono avere lo stesso colore
+    # --- Penalità: nodi adiacenti con stesso colore ---
     for (u, v) in edges:
-        for color in range(k_colors):
-            i = qubit_index(u, color)
-            j = qubit_index(v, color)
+        terms = []
+        for i in range(m):
+            op = (qml.PauliZ(qubits_for_node(u)[i]) @ qml.PauliZ(qubits_for_node(v)[i]))
+            terms.append((1 + op) / 2)
 
-            penalty = (1 - qml.PauliZ(i)) / 2 @ (1 - qml.PauliZ(j)) / 2
-            cost_h += penalty
+        # Prodotto dei termini
+        penalty = reduce(operator.matmul, terms)
+        cost_h += penalty
 
-    # Hamiltoniano di mixer
-    mixer_h = 0
-    for qubit in wires:
-        mixer_h += qml.PauliX(qubit)
+    # --- Penalità: codifiche non valide (se k < 2^m) ---
+    invalid_bitstrings = [b for b in product([0, 1], repeat=m) if int("".join(map(str, b)), 2) >= k_colors]
 
-    # QAOA Layer
+    for v in range(n_nodes):
+        q_v = qubits_for_node(v)
+        for b in invalid_bitstrings:
+            proj_terms = []
+            for i in range(m):
+                z = qml.PauliZ(q_v[i])
+                coeff = (-1)**b[i]
+                proj_terms.append((1 + coeff * z) / 2)
+
+            proj = reduce(operator.matmul, proj_terms)
+            cost_h += proj
+
+    # Mixer Hamiltonian
+    mixer_h = qml.Hamiltonian([], [])
+    for w in wires:
+        mixer_h += qml.PauliX(w)
+    
+    # QAOA layer
     def qaoa_layer(gamma, alpha):
         qml.ApproxTimeEvolution(cost_h, gamma, 1)
         qml.ApproxTimeEvolution(mixer_h, alpha, 1)
@@ -65,18 +73,18 @@ for k_colors in range(2,30):
         for w in wires:
             qml.Hadamard(wires=w)
         qml.layer(qaoa_layer, depth, params[0], params[1])
-
+    
     # Device
-    dev = qml.device("qulacs.simulator", wires=n_qubits)
+    dev = qml.device("default.qubit", wires=n_qubits)
 
     @qml.qnode(dev)
     def cost_function(params):
         circuit(params)
         return qml.expval(cost_h)
-
+    
     # Ottimizzazione
-    optimizer = qml.GradientDescentOptimizer()
-    steps = 500
+    optimizer = qml.AdamOptimizer()
+    steps = 100
     params = np.array([[0.5] * depth, [0.5] * depth], requires_grad=True)
 
     patience = 3           
@@ -114,49 +122,48 @@ for k_colors in range(2,30):
 
     probs = probability_circuit(best_params[0], best_params[1])
 
-    def decode_bitstring(bitstring, n_nodes, k_colors):
-        assignment = {}
-        for node in range(n_nodes):
-            for color in range(k_colors):
-                index = node * k_colors + color
-                if bitstring[index] == '1':
-                    if node in assignment:
-                        assignment[node].append(color)
-                    else:
-                        assignment[node] = [color]
-        return assignment
+    def decode_binary(bitstring, m):
+        return int(bitstring, 2)
 
-    def is_valid_coloring(assignment, edges):
-        # Ogni nodo deve avere esattamente un colore
-        for node, colors in assignment.items():
-            if len(assignment) != n_nodes or len(colors) != 1:
-                return False
-        # Nodi adiacenti non devono avere lo stesso colore
-        for u, v in edges:
-            color_u = assignment.get(u, [-1])[0]
-            color_v = assignment.get(v, [-2])[0]
-            if color_u == color_v:
-                return False
-        return True
+    def analyze_binary_results(probs, n_nodes, m, k_colors, edges, threshold=None):
+        if threshold is None:
+            threshold = max(probs) - 1e-4
 
-    def analyze_results(probs, n_nodes, k_colors, edges, threshold=np.max(probs)-0.00005):
         print("Bitstring | Assegnamento | Valido | Probabilità")
         print("-" * 50)
-        outcome = False
         deg = 0
-        for idx, prob in enumerate(probs):
-            if prob > threshold:
-                bitstring = format(idx, f"0{n_nodes * k_colors}b")
-                assignment = decode_bitstring(bitstring, n_nodes, k_colors)
-                valid = is_valid_coloring(assignment, edges)
-                print(f"{bitstring} | {assignment} | {valid} | {prob:.4f}")
-                if valid:
-                    outcome = True
-                    deg += 1
-        return assignment, outcome, deg
+        outcome = False
+        best_assignment = None
 
-    assignment, outcome, deg = analyze_results(probs, n_nodes, k_colors, edges)
+        for i, p in enumerate(probs):
+            if p < threshold:
+                continue
 
+            bitstring = format(i, f"0{n_nodes * m}b")
+            assignment = {}
+            valid = True
+
+            for v in range(n_nodes):
+                bits = bitstring[v * m:(v + 1) * m]
+                color = decode_binary(bits, m)
+                assignment[v] = color
+                if color >= k_colors:
+                    valid = False
+
+            for u, v in edges:
+                if assignment[u] == assignment[v]:
+                    valid = False
+
+            print(f"{bitstring} | {assignment} | {valid} | {p:.4f}")
+            if valid:
+                deg += 1
+                best_assignment = assignment
+                outcome = True
+
+        return best_assignment, outcome, deg
+
+    assignment, outcome, deg = analyze_binary_results(probs, n_nodes, m, k_colors, edges)
+    
     #Output: numero cromatico
     if outcome:
         print(f"Il numero minimo di colori per colorare il grafo è {k_colors} e si può fare in {deg} modi diversi")
@@ -164,11 +171,9 @@ for k_colors in range(2,30):
     else:
         print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")        
 
-
 #STAMPE E PLOTS
 print("Miglior costo trovato:", best_cost)
 print("Parametri corrispondenti:", best_params)
-
 # Plot convergenza
 plt.plot(cost_history)
 plt.title("Convergenza funzione costo")
@@ -179,26 +184,25 @@ plt.show()
 
 # Istogramma
 bitstrings = [format(i, f"0{n_qubits}b") for i in range(2**n_qubits)]
+
 plt.figure(figsize=(10, 4))
 plt.bar(bitstrings, probs)
 plt.xticks(rotation=90)
 plt.xlabel("Stati")
 plt.ylabel("Probabilità")
-plt.title("Distribuzione delle probabilità - QAOA con qudit")
+plt.title("Distribuzione delle probabilità - QAOA con encoding binario")
 plt.grid(True)
 plt.tight_layout()
 plt.show()
 
-# Visualizza grafo colorato
+# Visualizzazione grafo colorato
 def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
-    node_colors = [assignment[n][0] if len(assignment[n]) == 1 else -1 for n in graph.nodes]
-    unique_colors = sorted(set(c for c in node_colors if c != -1))
-    
+    node_colors = [assignment[n] for n in graph.nodes]
+    unique_colors = sorted(set(node_colors))
     n_colors = len(unique_colors)
     color_list = [cmap(i / max(1, n_colors - 1)) for i in range(n_colors)]
     color_map = {c: color_list[i] for i, c in enumerate(unique_colors)}
-
-    final_colors = [color_map.get(c, (0.7, 0.7, 0.7)) for c in node_colors]
+    final_colors = [color_map[c] for c in node_colors]
 
     if positions is None:
         positions = nx.spring_layout(graph, seed=42)
@@ -210,7 +214,6 @@ def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
         with_labels=True,
         node_color=final_colors,
         edge_color="gray",
-        cmap=cmap,
         node_size=800,
         font_color="black",
         font_weight="bold"
@@ -219,4 +222,5 @@ def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
     plt.axis('off')
     plt.show()
 
-plot_colored_graph(graph, assignment, positions)
+if assignment:
+    plot_colored_graph(graph, assignment, positions)

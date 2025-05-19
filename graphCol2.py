@@ -68,7 +68,6 @@ for k_colors in range(2,30):
 
 
     # Preparazione della barra di caricamento per l'ottimizzazione (con callback da "minimize")
-
     n_steps = 100  # massimo numero di iterazioni dell’ottimizzatore
     pbar = tqdm(total=n_steps, desc=f"Training Progress k={k_colors}...")
     def optimization_callback(xk):

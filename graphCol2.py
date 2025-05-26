@@ -5,13 +5,25 @@ from qutip import *
 from scipy.optimize import minimize
 from tqdm import tqdm
 
+# GRAFO
 # Parametri
-n_nodes = 3
-edges = [(0, 1), (1, 2), (2, 0)]
-graph = nx.Graph(edges)
+n_nodes = 5
+k_colors = 3
+edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)]
+graph = nx.Graph()
+graph.add_nodes_from(range(n_nodes))
+graph.add_edges_from(edges)
 positions = nx.spring_layout(graph, seed=1)
-nx.draw(graph, with_labels=True, pos=positions)
+#positions = nx.shell_layout(graph)
+#positions = nx.kamada_kawai_layout(graph)
+nx.draw(graph, positions, with_labels=True, node_color="lightgreen", edge_color="black", node_size=600)
 plt.show()
+
+# Trova il nodo con grado minimo
+fixed_node = min(graph.degree, key=lambda x: x[1])[0]
+fixed_color = 0
+# Lavora con un nodo (qdit) in meno (fissato uno)
+active_nodes = [i for i in range(n_nodes) if i != fixed_node]
 
 #FOR K_COLORS IN RANGE(30) GIRERÀ CERCANDO IL NUM CROMATICO DEL GRAFO
 for k_colors in range(2,30):
@@ -23,14 +35,50 @@ for k_colors in range(2,30):
         return tensor([hadamard_d for _ in range(n_nodes)])
 
     # Hamiltoniano di costo: penalizza se due nodi hanno stesso colore
-    def cost_hamiltonian(n_nodes, d, edges):
+    def cost_hamiltonian(n_nodes, active_nodes, d, edges, fixed_node, fixed_color):
+    
         H = 0
         for (i, j) in edges:
-            for c in range(d):
-                proj_i = basis(d, c) * basis(d, c).dag()
-                proj_j = basis(d, c) * basis(d, c).dag()
-                term = tensor([proj_i if k == i else proj_j if k == j else qeye(d) for k in range(n_nodes)])
-                H += term
+            
+            # Caso 1: entrambi i nodi sono attivi (non fissati)
+            if i != fixed_node and j != fixed_node:
+                i_idx = active_nodes.index(i)
+                j_idx = active_nodes.index(j)
+                for c in range(d):
+                    proj_i = basis(d, c) * basis(d, c).dag()
+                    proj_j = basis(d, c) * basis(d, c).dag()
+                    term = tensor([
+                        proj_i if k == i_idx else
+                        proj_j if k == j_idx else
+                        qeye(d)
+                        for k in range(n_nodes - 1)
+                    ])
+                    H += 1.5*term
+
+            # Caso 2: solo j è fisso
+            elif i != fixed_node and j == fixed_node:
+                i_idx = active_nodes.index(i)
+                for c in range(d):
+                    if c == fixed_color:
+                        proj_i = basis(d, c) * basis(d, c).dag()
+                        term = tensor([
+                            proj_i if k == i_idx else qeye(d)
+                            for k in range(n_nodes - 1)
+                        ])
+                        H += 2*term
+
+            # Caso 3: solo i è fisso
+            elif i == fixed_node and j != fixed_node:
+                j_idx = active_nodes.index(j)
+                for c in range(d):
+                    if c == fixed_color:
+                        proj_j = basis(d, c) * basis(d, c).dag()
+                        term = tensor([
+                            proj_j if k == j_idx else qeye(d)
+                            for k in range(n_nodes - 1)
+                        ])
+                        H += 2*term
+
         return H
 
     # Mixer Hamiltonian: somma di permutazioni fra i livelli
@@ -45,12 +93,12 @@ for k_colors in range(2,30):
         return H
 
     # Stato iniziale
-    psi0 = initial_state(n_nodes, k_colors)
+    psi0 = initial_state(len(active_nodes), k_colors)
 
     # Hamiltoniani
-    Hc = cost_hamiltonian(n_nodes, k_colors, edges)
-    Hm = mixer_hamiltonian(n_nodes, k_colors)
-    
+    Hc = cost_hamiltonian(n_nodes, active_nodes, k_colors, edges, fixed_node, fixed_color)
+    Hm = mixer_hamiltonian(len(active_nodes), k_colors)
+
     # Funzione costo: aspettazione dell'H_cost sullo stato finale
     loss_history = []
 
@@ -66,10 +114,10 @@ for k_colors in range(2,30):
         loss_history.append(expectation)  # salva loss
         return expectation
 
-
     # Preparazione della barra di caricamento per l'ottimizzazione (con callback da "minimize")
     n_steps = 100  # massimo numero di iterazioni dell’ottimizzatore
     pbar = tqdm(total=n_steps, desc=f"Training Progress k={k_colors}...")
+
     def optimization_callback(xk):
         pbar.update(1)
 
@@ -89,7 +137,6 @@ for k_colors in range(2,30):
     opt_params = result.x
     opt_expectation = result.fun
 
-
     # Stato finale con parametri ottimizzati
     final_state = psi0
     for gamma, alpha in zip(opt_params[:depth], opt_params[depth:]):
@@ -99,17 +146,29 @@ for k_colors in range(2,30):
     # Probabilità finali
     probs = np.abs(final_state.full().flatten())**2
 
-    # Istogramma
-    n_levels = k_colors
-    labels = [np.base_repr(i, base=n_levels).zfill(n_nodes) for i in range(n_levels**n_nodes)]
+    # digitstring completa (include nodo fissato)
+    def insert_fixed_digitstring(raw_digitstring, fixed_node, fixed_color, n_nodes):
+        chunks = []
+        active_index = 0
+        for node in range(n_nodes):
+            if node == fixed_node:
+                chunks.append(str(fixed_color))
+            else:
+                chunks.append(str(raw_digitstring[active_index]))
+                active_index += 1
+        return ''.join(chunks)
+
+    digitstrings = []
+    for i in range(k_colors**len(active_nodes)):
+        raw = np.base_repr(i, base=k_colors).zfill(len(active_nodes))
+        full = insert_fixed_digitstring(raw, fixed_node, fixed_color, n_nodes)
+        digitstrings.append(full)
 
     # Decodifica e analisi delle stringhe di output
     def decode_qudit_string(s):
-        """Trasforma una stringa tipo '012' in un dizionario nodo → colore"""
         return {node: int(color) for node, color in enumerate(s)}
 
     def is_valid_coloring_qudit(assignment, edges):
-        """Controlla che due nodi adiacenti non abbiano lo stesso colore"""
         for u, v in edges:
             if assignment[u] == assignment[v]:
                 return False
@@ -124,7 +183,7 @@ for k_colors in range(2,30):
 
     for i, p in enumerate(probs):
         if p > threshold:
-            s = np.base_repr(i, base=k_colors).zfill(n_nodes)
+            s = digitstrings[i]
             assignment = decode_qudit_string(s)
             valid = is_valid_coloring_qudit(assignment, edges)
             print(f"{s} | {assignment} | {valid} | {p:.4f}")
@@ -134,17 +193,17 @@ for k_colors in range(2,30):
 
     #Output: numero cromatico
     if valid_count > 0:
-        print(f"Il numero cromatico del grafo è {k_colors} e si può colorare in {valid_count} modi diversi")
+        print(f"Il numero minimo di colori per colorare il grafo è {k_colors} e si può fare in {valid_count} modi diversi")
         break
     else:
-        print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")
+        print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")        
 
+# STAMPE E PLOTS
 
-#STAMPE E PLOTS
 print("Migliori parametri trovati:", opt_params)
 print("Valore minimo atteso H_cost:", opt_expectation)
 
-# Plot convergenza 
+# Plot convergenza funzione costo
 plt.plot(loss_history)
 plt.xlabel("Step")
 plt.ylabel("Costo")
@@ -154,17 +213,17 @@ plt.show()
 
 # Istogramma
 plt.figure(figsize=(10, 4))
-plt.bar(labels, probs)
+plt.bar(digitstrings, probs)
 plt.xticks(rotation=90)
-plt.xlabel("Stati (bitstring in base colori)")
+plt.xlabel("Stati")
 plt.ylabel("Probabilità")
 plt.title("Distribuzione delle probabilità - QAOA con qudit")
 plt.grid(True)
 plt.tight_layout()
 plt.show()
 
-# Visualizza grafo colorato
-def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
+# Visualizzazione grafo colorato
+def plot_colored_graph(graph, assignment, positions, cmap=plt.cm.Set3):
     node_colors = [assignment[n] for n in graph.nodes]
     unique_colors = sorted(set(node_colors))
     
@@ -173,16 +232,13 @@ def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
     color_map = {c: color_list[i] for i, c in enumerate(unique_colors)}
     final_colors = [color_map[c] for c in node_colors]
 
-    if positions is None:
-        positions = nx.spring_layout(graph, seed=42)
-
     plt.figure(figsize=(6, 4))
     nx.draw(
         graph,
         pos=positions,
         with_labels=True,
         node_color=final_colors,
-        edge_color="gray",
+        edge_color="black",
         node_size=800,
         font_color="black",
         font_weight="bold"

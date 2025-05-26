@@ -7,45 +7,79 @@ from itertools import product
 from functools import reduce
 import operator
 
-#GRAFO
+# GRAFO
 # Parametri
-n_nodes = 3
+n_nodes = 5
 k_colors = 3
-edges = [(0, 1), (1, 2), (2, 0)]
-graph = nx.Graph(edges)
+edges = [
+    (0, 1), (1, 2), (2, 3), (3, 4), (4, 0)
+]
+graph = nx.Graph()
+graph.add_nodes_from(range(n_nodes))
+graph.add_edges_from(edges)
 positions = nx.spring_layout(graph, seed=1)
-nx.draw(graph, with_labels=True, pos=positions)
+#positions = nx.shell_layout(graph)
+#positions = nx.kamada_kawai_layout(graph)
+nx.draw(graph, positions, with_labels=True, node_color="lightgreen", edge_color="black", node_size=600)
 plt.show()
 
+# Trova il nodo con grado minimo
+fixed_node = min(graph.degree, key=lambda x: x[1])[0]
+fixed_color = 0
+
 #FOR K_COLORS IN RANGE(30) GIRERÀ CERCANDO IL NUM CROMATICO DEL GRAFO
-for k_colors in range(2, 30):
+for k_colors in range(2,30):
 
     m = int(np.ceil(np.log2(k_colors)))  # qubits per nodo
-    n_qubits = n_nodes * m
+    # Bitstring fissa (es. "00" se fixed_color = 0 con k=3)
+    fixed_bitstring = format(fixed_color, f"0{m}b")
+    fixed_color_bits = [int(b) for b in format(fixed_color, f"0{m}b")]
+
+    # Mapping solo per i nodi NON fissati
+    active_nodes = [n for n in range(n_nodes) if n != fixed_node]
+    n_qubits = len(active_nodes) *  m
     wires = list(range(n_qubits))
 
     # Qubit per nodo
     def qubits_for_node(v):
-        return [v * m + i for i in range(m)]
+        assert v != fixed_node, "Nodo fissato non ha qubit"
+        idx = active_nodes.index(v) 
+        return [idx * m + i for i in range(m)]
+
 
     # Hamiltoniano di costo
     cost_h = qml.Hamiltonian([], [])  # inizializzazione esplicita
 
     # --- Penalità: nodi adiacenti con stesso colore ---
+    fixed_color_bits = [int(b) for b in format(fixed_color, f"0{m}b")]
     for (u, v) in edges:
-        terms = []
-        for i in range(m):
-            op = (qml.PauliZ(qubits_for_node(u)[i]) @ qml.PauliZ(qubits_for_node(v)[i]))
-            terms.append((1 + op) / 2)
-
-        # Prodotto dei termini
-        penalty = reduce(operator.matmul, terms)
-        cost_h += penalty
+        
+        # Se entrambi NON sono il nodo fissato
+        if u != fixed_node and v != fixed_node:
+            terms = []
+            for i in range(m):
+                op = (qml.PauliZ(qubits_for_node(u)[i]) @ qml.PauliZ(qubits_for_node(v)[i]))
+                terms.append((1 + op) / 2)
+            penalty = reduce(operator.matmul, terms)
+            cost_h += 1.2*penalty
+        
+        else:
+            # Solo uno dei due è il nodo fissato
+            unfixed = v if u == fixed_node else u
+            proj_terms = []
+            for i in range(m):
+                z = qml.PauliZ(qubits_for_node(unfixed)[i])
+                coeff = (-1)**fixed_color_bits[i]
+                proj_terms.append((1 + coeff * z) / 2)
+            projector = reduce(operator.matmul, proj_terms)
+            cost_h += projector
 
     # --- Penalità: codifiche non valide (se k < 2^m) ---
     invalid_bitstrings = [b for b in product([0, 1], repeat=m) if int("".join(map(str, b)), 2) >= k_colors]
 
     for v in range(n_nodes):
+        if (v == fixed_node):
+            continue
         q_v = qubits_for_node(v)
         for b in invalid_bitstrings:
             proj_terms = []
@@ -56,6 +90,7 @@ for k_colors in range(2, 30):
 
             proj = reduce(operator.matmul, proj_terms)
             cost_h += proj
+    cost_h = cost_h*10
 
     # Mixer Hamiltonian
     mixer_h = qml.Hamiltonian([], [])
@@ -68,7 +103,7 @@ for k_colors in range(2, 30):
         qml.ApproxTimeEvolution(mixer_h, alpha, 1)
 
     # Circuito
-    depth = 2
+    depth = 1
     def circuit(params, **kwargs):
         for w in wires:
             qml.Hadamard(wires=w)
@@ -81,14 +116,14 @@ for k_colors in range(2, 30):
     def cost_function(params):
         circuit(params)
         return qml.expval(cost_h)
-    
+
     # Ottimizzazione
     optimizer = qml.AdamOptimizer()
     steps = 100
     params = np.array([[0.5] * depth, [0.5] * depth], requires_grad=True)
 
-    patience = 3           
-    min_delta = 0.01        
+    patience = 6          
+    min_delta = 0.001        
     counter = 0
     cost_history = []
     best_cost = np.inf
@@ -113,7 +148,6 @@ for k_colors in range(2, 30):
 
         params = optimizer.step(cost_function, params)
 
-
     # Probabilità finali
     @qml.qnode(dev)
     def probability_circuit(gamma, alpha):
@@ -122,12 +156,48 @@ for k_colors in range(2, 30):
 
     probs = probability_circuit(best_params[0], best_params[1])
 
+    # Bitstring completa (include nodo fissato)
+    def insert_fixed_bitstring(raw_bitstring, fixed_node, fixed_bitstring, n_nodes, k_colors):
+        chunks = []
+        active_index = 0
+        for node in range(n_nodes):
+            if node == fixed_node:
+                chunks.append(fixed_bitstring)
+            else:
+                start = active_index * m
+                end = (active_index + 1) * m
+                chunks.append(raw_bitstring[start:end])
+                active_index += 1
+        return ''.join(chunks)
+
+    bitstrings = []
+    for i in range(2**n_qubits):
+        raw = format(i, f"0{n_qubits}b")
+        full = insert_fixed_bitstring(raw, fixed_node, fixed_bitstring, n_nodes, k_colors)
+        bitstrings.append(full)
+
+    # Analisi risultati
     def decode_binary(bitstring, m):
         return int(bitstring, 2)
 
+    def decode_bitstring(bitstring, n_nodes, m, fixed_node, fixed_color):
+        assignment = {fixed_node: fixed_color}
+        active_index = 0
+        for node in range(n_nodes):
+            if node == fixed_node:
+                continue
+            
+            bits = bitstring[active_index:active_index + m]
+            color = int(bits, 2)  # converte la sottostringa binaria in intero
+            assignment[node] = color
+            
+            active_index += m
+            
+        return assignment
+
     def analyze_binary_results(probs, n_nodes, m, k_colors, edges, threshold=None):
         if threshold is None:
-            threshold = max(probs) - 1e-4
+            threshold = max(probs) - 1e-7
 
         print("Bitstring | Assegnamento | Valido | Probabilità")
         print("-" * 50)
@@ -136,34 +206,35 @@ for k_colors in range(2, 30):
         best_assignment = None
 
         for i, p in enumerate(probs):
-            if p < threshold:
-                continue
+            if p > threshold:
 
-            bitstring = format(i, f"0{n_nodes * m}b")
-            assignment = {}
-            valid = True
+                bitstring = format(i, f"0{n_qubits}b")
+                assignment = decode_bitstring(bitstring, n_nodes, m, fixed_node, fixed_color)
+                valid = True
+                bitstring_full = insert_fixed_bitstring(bitstring, fixed_node, fixed_bitstring, n_nodes, m)            
 
-            for v in range(n_nodes):
-                bits = bitstring[v * m:(v + 1) * m]
-                color = decode_binary(bits, m)
-                assignment[v] = color
-                if color >= k_colors:
-                    valid = False
+                for v in range(n_nodes):
+                    if v==fixed_node:
+                        continue
+                    bits = bitstring_full[v * m:(v + 1) * m]
+                    color = decode_binary(bits, m)
+                    assignment[v] = color
+                    if color >= k_colors:
+                        valid = False
 
-            for u, v in edges:
-                if assignment[u] == assignment[v]:
-                    valid = False
+                for u, v in edges:
+                    if assignment[u] == assignment[v]:
+                        valid = False
 
-            print(f"{bitstring} | {assignment} | {valid} | {p:.4f}")
-            if valid:
-                deg += 1
-                best_assignment = assignment
-                outcome = True
+                print(f"{bitstring_full} | {assignment} | {valid} | {p}")
+                if valid:
+                    deg += 1
+                    best_assignment = assignment
+                    outcome = True
 
         return best_assignment, outcome, deg
 
     assignment, outcome, deg = analyze_binary_results(probs, n_nodes, m, k_colors, edges)
-    
     #Output: numero cromatico
     if outcome:
         print(f"Il numero minimo di colori per colorare il grafo è {k_colors} e si può fare in {deg} modi diversi")
@@ -172,8 +243,10 @@ for k_colors in range(2, 30):
         print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")        
 
 #STAMPE E PLOTS
+
 print("Miglior costo trovato:", best_cost)
 print("Parametri corrispondenti:", best_params)
+
 # Plot convergenza
 plt.plot(cost_history)
 plt.title("Convergenza funzione costo")
@@ -183,8 +256,6 @@ plt.grid(True)
 plt.show()
 
 # Istogramma
-bitstrings = [format(i, f"0{n_qubits}b") for i in range(2**n_qubits)]
-
 plt.figure(figsize=(10, 4))
 plt.bar(bitstrings, probs)
 plt.xticks(rotation=90)
@@ -196,7 +267,7 @@ plt.tight_layout()
 plt.show()
 
 # Visualizzazione grafo colorato
-def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
+def plot_colored_graph(graph, assignment, positions, cmap=plt.cm.Set3):
     node_colors = [assignment[n] for n in graph.nodes]
     unique_colors = sorted(set(node_colors))
     n_colors = len(unique_colors)
@@ -204,16 +275,13 @@ def plot_colored_graph(graph, assignment, positions=None, cmap=plt.cm.Set3):
     color_map = {c: color_list[i] for i, c in enumerate(unique_colors)}
     final_colors = [color_map[c] for c in node_colors]
 
-    if positions is None:
-        positions = nx.spring_layout(graph, seed=42)
-
     plt.figure(figsize=(6, 4))
     nx.draw(
         graph,
         pos=positions,
         with_labels=True,
         node_color=final_colors,
-        edge_color="gray",
+        edge_color="black",
         node_size=800,
         font_color="black",
         font_weight="bold"

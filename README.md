@@ -11,7 +11,7 @@ I seguenti file sono presenti nella repository:
 2. `graphColOne.py`    - Versione compatta e automatizzata del codice *one-hot*. Restituisce il numero cromatico dato un grafo in input.
 
 3. `graphColBin.ipynb` - Notebook con metodo QAOA usando codifica *binaria*. Contiene sezioni teoriche ed esempi.
-4. `graphColBin.py`    - Versione semplificata del codice *binario*. Calcola il numero cromatico del grafo.
+4. `graphColBin.py`    - Versione compatta del codice *binario*. Calcola il numero cromatico del grafo.
 
 5. `graphColQd.ipynb`  - Notebook esplorativo dell’estensione del graph coloring a *qudit*. Include teoria e codice dimostrativo.
 6. `graphColQd.py`     - Implementazione compatta del metodo basato su qudit. Ritorna il numero cromatico stimato.

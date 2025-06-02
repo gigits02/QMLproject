@@ -24,7 +24,7 @@ Caratteristiche principali
   - One-hot (più qubit, codifica semplice)
   - Binaria (meno qubit, codifica più compatta)
   - Qudit (versatilità teorica, ancora esplorativa)
-- Ogni file `.ipynb` contiene spiegazioni teoriche, visualizzazioni e test.
+- Ogni file `.ipynb` contiene spiegazioni teoriche, visualizzazioni e tests.
 - Ogni file `.py` è progettato per l'esecuzione diretta su un grafo definito, restituendo il **numero cromatico** stimato.
 
 Requisiti

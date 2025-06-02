@@ -200,8 +200,8 @@ for k_colors in range(2,30):
 
 # STAMPE E PLOTS
 
-print("Migliori parametri trovati:", opt_params)
 print("Valore minimo atteso H_cost:", opt_expectation)
+print("Migliori parametri trovati:", opt_params)
 
 # Plot convergenza funzione costo
 plt.plot(loss_history)

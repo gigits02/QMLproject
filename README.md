@@ -1,7 +1,8 @@
 Graph Coloring with QAOA
 =========================
 
-Questa repository contiene diverse implementazioni del protocollo QAOA (Quantum Approximate Optimization Algorithm) applicato al problema del **graph coloring**. Le varianti presenti utilizzano differenti codifiche dei qubit (one-hot e binaria) e un'estensione concettuale basata su **qudit**, ovvero stati quantistici con d livelli.
+Questa repository contiene diverse implementazioni del protocollo QAOA (Quantum Approximate Optimization Algorithm) applicato al problema del **graph coloring**. Le varianti presenti utilizzano differenti codifiche dei qubit (one-hot e bi
+naria) e un'estensione concettuale basata su **qudit**, ovvero stati quantistici con d livelli.
 
 Contenuto della repository
 --------------------------

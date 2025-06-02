@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 
 # GRAFO
 # Parametri
-n_nodes = 5
-edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)]
+n_nodes = 3
+edges = [(0, 1), (1, 2), (2, 0)]
 graph = nx.Graph()
 graph.add_nodes_from(range(n_nodes))
 graph.add_edges_from(edges)

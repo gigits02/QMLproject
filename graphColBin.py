@@ -9,10 +9,16 @@ import operator
 
 # GRAFO
 # Parametri
-n_nodes = 5
-k_colors = 3
+n_nodes = 10
 edges = [
-    (0, 1), (1, 2), (2, 3), (3, 4), (4, 0)
+    (0, 1), (0, 4), (0, 5),
+    (1, 2), (1, 6),
+    (2, 3), (2, 7),
+    (3, 4), (3, 8),
+    (4, 9),
+    (5, 7), (5, 8),
+    (6, 8), (6, 9),
+    (7, 9)
 ]
 graph = nx.Graph()
 graph.add_nodes_from(range(n_nodes))
@@ -20,6 +26,17 @@ graph.add_edges_from(edges)
 positions = nx.spring_layout(graph, seed=1)
 #positions = nx.shell_layout(graph)
 #positions = nx.kamada_kawai_layout(graph)
+positions = {}
+# Pentagono esterno (nodi 0-4)
+for i in range(5):
+    angle = 2 * np.pi * i / 5
+    positions[i] = (np.cos(angle), np.sin(angle))
+
+# Pentagramma interno (nodi 5-9)
+for i in range(5):
+    angle = 2 * np.pi * i / 5 + np.pi / 5
+    positions[i + 5] = (0.5 * np.cos(angle), 0.5 * np.sin(angle))
+
 nx.draw(graph, positions, with_labels=True, node_color="lightgreen", edge_color="black", node_size=600)
 plt.show()
 
@@ -237,7 +254,7 @@ for k_colors in range(2,30):
     assignment, outcome, deg = analyze_binary_results(probs, n_nodes, m, k_colors, edges)
     #Output: numero cromatico
     if outcome:
-        print(f"Il numero minimo di colori per colorare il grafo è {k_colors} e si può fare in {deg} modi diversi")
+        print(f"Il numero cromatico del grafo è {k_colors}.")
         break
     else:
         print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")        
@@ -254,7 +271,7 @@ plt.xlabel("Step")
 plt.ylabel("Costo")
 plt.grid(True)
 plt.show()
-
+'''
 # Istogramma
 plt.figure(figsize=(10, 4))
 plt.bar(bitstrings, probs)
@@ -265,7 +282,7 @@ plt.title("Distribuzione delle probabilità - QAOA con encoding binario")
 plt.grid(True)
 plt.tight_layout()
 plt.show()
-
+'''
 # Visualizzazione grafo colorato
 def plot_colored_graph(graph, assignment, positions, cmap=plt.cm.Set3):
     node_colors = [assignment[n] for n in graph.nodes]

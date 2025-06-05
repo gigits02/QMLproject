@@ -7,9 +7,8 @@ from tqdm import tqdm
 
 # GRAFO
 # Parametri
-n_nodes = 5
-k_colors = 3
-edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)]
+n_nodes = 3
+edges = [(0, 1), (1, 2), (2, 0)]
 graph = nx.Graph()
 graph.add_nodes_from(range(n_nodes))
 graph.add_edges_from(edges)
@@ -53,7 +52,7 @@ for k_colors in range(2,30):
                         qeye(d)
                         for k in range(n_nodes - 1)
                     ])
-                    H += 1.5*term
+                    H += term
 
             # Caso 2: solo j è fisso
             elif i != fixed_node and j == fixed_node:
@@ -65,7 +64,7 @@ for k_colors in range(2,30):
                             proj_i if k == i_idx else qeye(d)
                             for k in range(n_nodes - 1)
                         ])
-                        H += 2*term
+                        H += term
 
             # Caso 3: solo i è fisso
             elif i == fixed_node and j != fixed_node:
@@ -77,7 +76,7 @@ for k_colors in range(2,30):
                             proj_j if k == j_idx else qeye(d)
                             for k in range(n_nodes - 1)
                         ])
-                        H += 2*term
+                        H += term
 
         return H
 
@@ -193,7 +192,7 @@ for k_colors in range(2,30):
 
     #Output: numero cromatico
     if valid_count > 0:
-        print(f"Il numero minimo di colori per colorare il grafo è {k_colors} e si può fare in {valid_count} modi diversi")
+        print(f"Il numero minimo di colori per colorare il grafo è {k_colors}")
         break
     else:
         print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")        

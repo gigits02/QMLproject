@@ -54,7 +54,6 @@ for k_colors in range(2,30):
         for t in terms[1:]:
             sum_x += t
         cost_h += (sum_x @ sum_x - 2 * sum_x + 1)
-    #cost_h = 1.2*cost_h
         
     # Vincolo: nodi adiacenti non devono avere lo stesso colore
     for (u, v) in edges:
@@ -94,7 +93,7 @@ for k_colors in range(2,30):
         qml.ApproxTimeEvolution(mixer_h, alpha, 1)
 
     # Circuito
-    depth = 3
+    depth = 1
     def circuit(params, **kwargs):
         for w in wires:
             qml.Hadamard(wires=w)
@@ -219,7 +218,7 @@ for k_colors in range(2,30):
     assignment, outcome, deg = analyze_results(probs, n_nodes, k_colors, edges)
     #Output: numero cromatico
     if outcome:
-        print(f"Il numero minimo di colori per colorare il grafo è {k_colors} e si può fare in {deg} modi diversi")
+        print(f"Il numero minimo di colori per colorare il grafo è {k_colors}")
         break
     else:
         print(f"\nNessuna colorazione valida trovata con {k_colors} colori. Provo con {k_colors+1}...")        
